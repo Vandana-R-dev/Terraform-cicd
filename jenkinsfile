@@ -1,0 +1,72 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_CREDS = credentials('aws-credentials') // AWS credentials stored in Jenkins
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git 'https://github.com/your-repo/terraform.git'
+            }
+        }
+
+        stage('Initialize Terraform') {
+            steps {
+                sh 'terraform init'
+            }
+        }
+
+        stage('Validate Terraform') {
+            steps {
+                sh 'terraform validate'
+            }
+        }
+
+        stage('Plan Terraform') {
+            steps {
+                // Run terraform plan and save the output to a file.
+                sh 'terraform plan -out=tfplan > plan.txt'
+                // Archive the plan file for review in the Jenkins UI.
+                archiveArtifacts artifacts: 'plan.txt', fingerprint: true
+                // Print the plan output to the console for review.
+                sh 'cat plan.txt'
+            }
+        }
+
+        stage('Approval for Apply or Destroy') {
+            steps {
+                script {
+                    // Prompt for decision: apply changes or destroy infrastructure.
+                    def userInput = input(
+                        id: 'userDecision', message: 'Choose an action:', parameters: [
+                            choice(name: 'ACTION', choices: 'Apply\nDestroy\nAbort', description: 'Select the desired action')
+                        ]
+                    )
+
+                    // Store the decision in the environment variable.
+                    env.USER_DECISION = userInput
+                }
+            }
+        }
+
+        stage('Apply or Destroy') {
+            steps {
+                script {
+                    if (env.USER_DECISION == 'Apply') {
+                        echo 'User approved to apply changes'
+                        sh 'terraform apply -auto-approve tfplan'
+                    } else if (env.USER_DECISION == 'Destroy') {
+                        echo 'User approved to destroy infrastructure'
+                        sh 'terraform destroy -auto-approve'
+                    } else {
+                        echo 'User aborted the operation.'
+                        currentBuild.result = 'ABORTED'
+                        error("Operation aborted by user")
+                    }
+                }
+            }
+        }
+    }
+}
